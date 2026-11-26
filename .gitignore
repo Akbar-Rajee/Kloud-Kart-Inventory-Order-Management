@@ -4,3 +4,6 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Instructor dataset - do not commit customer data
+M03_Resources/data/*.csv
