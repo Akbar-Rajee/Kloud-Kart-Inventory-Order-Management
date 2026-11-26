@@ -1,10 +1,10 @@
 # Kloud Kart Inventory & Order Management
 
-**SQL for Data Engineering â€” PostgreSQL project**
+**SQL for Data Engineering - PostgreSQL project**
 
 ## 1. Project overview
 
-Kloud Kart is an e-commerce inventory and order management system. This project improves the reliability of order placement, customer spending analytics, inventory visibility and inventory movement auditing using PostgreSQL.
+Kloud Kart is an e-commerce inventory and order management system. This project improves the reliability of order placement, customer spending analytics, inventory visibility, inventory movement auditing and data-quality monitoring using PostgreSQL.
 
 The implementation works with the supplied database schema and dataset. It does not require a new database server or infrastructure.
 
@@ -14,8 +14,8 @@ The implementation works with the supplied database schema and dataset. It does 
 - Generate a customer spending report with monthly and cumulative totals.
 - Rank the top 100 customers by spending.
 - Roll up low-stock products through a hierarchical category structure.
-- Maintain an auditable record of inventory movements.
-- Identify data-quality and inventory reconciliation exceptions.
+- Maintain an auditable record of sales, restocks and stock corrections.
+- Identify and persist data-quality and inventory reconciliation exceptions.
 
 ## 2. Technology
 
@@ -38,10 +38,14 @@ Kloud-Kart-Inventory-Order-Management/
 |   |   `-- 01_place_order.sql
 |   |-- 02_analytics/
 |   |   `-- 01_customer_spending_report.sql
-|   `-- 03_inventory/
-|       |-- 01_low_stock_category_report.sql
-|       |-- 02_category_exceptions.sql
-|       `-- 03_inventory_reconciliation.sql
+|   |-- 03_inventory/
+|   |   |-- 01_low_stock_category_report.sql
+|   |   |-- 02_category_exceptions.sql
+|   |   |-- 03_inventory_reconciliation.sql
+|   |   `-- 04_adjust_inventory.sql
+|   `-- 04_diagnostics/
+|       |-- 01_data_quality_exception_register.sql
+|       `-- 02_scan_data_quality.sql
 |-- reports/
 |   `-- concurrency_test_results.md
 |-- docs/
@@ -88,15 +92,17 @@ The original dataset contains:
 
 ```powershell
 docker exec kloudkart rm -rf /tmp/kloudkart_sql
-docker cp .\sql kloudkart:/tmp/kloudkart_sql
+docker exec kloudkart mkdir -p /tmp/kloudkart_sql
+docker cp .\sql\. kloudkart:/tmp/kloudkart_sql/
 ```
 
 ### Step 4: Install database objects in order
 
-Run the following commands:
+Run the following commands after the original schema and data load:
 
 ```powershell
 docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/00_setup/01_sequences.sql
+
 docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/00_setup/02_stock_protection.sql
 
 docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/01_transactions/01_place_order.sql
@@ -108,13 +114,29 @@ docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/
 docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/03_inventory/02_category_exceptions.sql
 
 docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/03_inventory/03_inventory_reconciliation.sql
+
+docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/03_inventory/04_adjust_inventory.sql
+
+docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/04_diagnostics/01_data_quality_exception_register.sql
+
+docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/04_diagnostics/02_scan_data_quality.sql
 ```
+
+### Step 5: Populate the data-quality exception register
+
+After installing the diagnostic table, function and scanner:
+
+```powershell
+docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -c "CALL scan_data_quality_exceptions();"
+```
+
+This scans the source tables and records detected exceptions without deleting or silently correcting the original records.
 
 ## 5. Implemented solutions
 
 ### Concurrent order placement
 
-The `place_order()` function uses a conditional stock update:
+The `place_order()` function uses an atomic conditional stock update:
 
 ```sql
 UPDATE products
@@ -139,13 +161,26 @@ The `customer_spending_report` view provides:
 - Customer spending rank.
 - Top-100 indicator.
 
-### Inventory visibility
+### Inventory visibility and control
 
-Three views provide:
+The inventory implementation provides:
 
 - `low_stock_category_report`: low-stock products rolled up through category ancestors.
 - `product_category_exceptions`: products assigned to missing or unreachable categories.
 - `inventory_reconciliation_review`: inventory balances requiring reconciliation review.
+- `adjust_inventory()`: controlled restocking and stock corrections with explanatory notes and corresponding inventory movements.
+
+The adjustment function rejects zero quantity changes, invalid movement reasons, missing notes and adjustments that would produce negative stock.
+
+### Data-quality exception monitoring
+
+The diagnostic implementation provides:
+
+- `data_quality_exceptions`: persistent exception register storing original row values as JSONB, issue types, detection timestamps, detection counts and investigation status.
+- `record_data_quality_exception()`: records new exceptions and updates detection metadata when existing issues are detected again.
+- `scan_data_quality_exceptions()`: scans source tables for identified data-quality problems and records the findings.
+
+The register preserves the first captured source snapshot. It does not automatically resolve an exception when an issue disappears; resolution requires investigation.
 
 ## 6. Testing and performance evidence
 
@@ -160,6 +195,17 @@ The supplied, unmodified `race_test.py` passed:
 - Five successful sales with five corresponding inventory movements in the audit test.
 
 Flash-sale test execution time: **4.72 seconds**.
+
+### Inventory adjustment testing
+
+The `adjust_inventory()` function was tested inside a transaction that was rolled back:
+
+- Restock of 5 units succeeded.
+- Correction of -2 units succeeded.
+- Excessive correction was rejected.
+- NULL movement reason was rejected.
+- Both successful movements were visible in the audit log during the test.
+- Rollback restored the original stock and removed the temporary movements.
 
 ### Analytics performance
 
@@ -195,8 +241,10 @@ The restored dataset produced:
 - The report generates 13 monthly labels, from the month containing the date 12 months ago through the current month. The first and last months may be partial.
 - The reconciliation view is indicative because the supplied dataset does not establish a verified opening-stock balance.
 - The inventory log does not contain a dedicated order ID column. The implemented order function records the order ID in the movement note.
+- The stock protection CHECK constraint is initially `NOT VALID` because 14 historical products have negative stock. It enforces the constraint for new inserts and updates while those historical exceptions remain under investigation.
+- The data-quality register records original snapshots and detection metadata; it is not a complete change-history system.
 - Performance measurements reflect the supplied dataset and local Docker environment. They are not a production SLA.
-- Category exceptions are reported rather than automatically corrected because the appropriate category assignments require business validation.
+- Category exceptions are reported rather than automatically corrected because appropriate category assignments require business validation.
 
 ## 8. Running the supplied concurrency test
 
@@ -210,4 +258,4 @@ The instructor's test script is used without modification.
 
 ## 9. Business outcome
 
-The solution demonstrates safer order placement, customer analytics generated in seconds, hierarchical low-stock reporting and improved inventory audit visibility using the existing PostgreSQL environment.
+The solution demonstrates safer order placement, customer analytics generated in seconds, hierarchical low-stock reporting, controlled inventory adjustments and persistent data-quality exception monitoring using the existing PostgreSQL environment.

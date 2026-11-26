@@ -2,10 +2,7 @@
 
 ## 1. Overview
 
-The solution improves order safety, customer-spending analytics,
-category-level stock visibility, and inventory auditability using
-PostgreSQL features. The existing relational schema is retained. No
-additional infrastructure is introduced.
+The solution improves order safety, customer-spending analytics, category-level stock visibility, inventory auditability, and persistent data-quality monitoring using PostgreSQL features. The existing relational schema is retained. No additional infrastructure is introduced.
 
 ## 2. Preventing overselling
 
@@ -19,7 +16,9 @@ UPDATE products
 SET stock_quantity = stock_quantity - p_quantity
 WHERE product_id = p_product_id
   AND stock_quantity >= p_quantity
-RETURNING price;
+  AND stock_quantity IS NOT NULL
+  AND price IS NOT NULL
+RETURNING price INTO v_price;
 ```
 
 ### Why this works
@@ -157,26 +156,81 @@ The reconciliation view assumes a zero opening balance. Because
 historical opening balances are unavailable, mismatches are review flags
 rather than proof of incorrect stock.
 
-## 6. Additional implementation: data-quality exception views
+### Controlled restocks and corrections
 
-The project includes `product_category_exceptions` and
-`inventory_reconciliation_review` in addition to the required reporting
-functionality.
+The `adjust_inventory()` function provides a controlled way to record
+restocks and stock corrections.
 
-These views make historical integrity issues visible without silently
-modifying or deleting source records. This is safer than applying
-unverified corrections to operational data.
+It:
+
+- Accepts only `restock` and `correction` movement reasons.
+- Requires a non-zero quantity change and an explanatory note.
+- Requires restock quantities to be positive.
+- Rejects adjustments that would produce negative stock.
+- Updates product stock and inserts the corresponding inventory
+  movement in the same transaction.
+
+The conditional `UPDATE` protects against concurrent adjustments
+producing an invalid stock balance. If the inventory movement cannot
+be inserted, the stock update is rolled back.
+
+Functional tests confirmed that valid restocks and corrections succeed,
+excessive corrections and NULL reasons are rejected, and the test
+transaction can be rolled back without changing the original stock.
+
+## 6. Additional implementation: persistent data-quality exception register
+
+In addition to the diagnostic views, the project implements a
+database-level data-quality exception register.
+
+The `data_quality_exceptions` table stores:
+
+- Source table and source record identifier.
+- Issue type.
+- Original source-record values as JSONB.
+- First and most recent detection timestamps.
+- Number of times the issue has been detected.
+- Investigation status and optional resolution information.
+
+The `record_data_quality_exception()` function inserts new exceptions
+and updates the detection metadata when an existing issue is detected
+again.
+
+The `scan_data_quality_exceptions()` procedure checks the source data
+for identified problems, including negative stock, missing references,
+missing notes, duplicate normalized emails, suspicious quantities,
+category hierarchy problems, and inconsistent order statuses.
+
+The scanner records the original row values rather than deleting or
+silently correcting problematic source data.
+
+The register preserves the first captured source snapshot and detection
+metadata. It is not a complete history of every subsequent change to a
+source record, and disappearance of an issue does not automatically
+mark its exception as resolved. Resolution requires an explicit
+investigation process.
+
+The `product_category_exceptions` and
+`inventory_reconciliation_review` views remain available for
+operational investigation.
 
 ## 7. Deployment order
 
 Run the SQL files after the original instructor schema and data load:
 
-1.  `sql/00_setup/01_sequences.sql`
-2.  `sql/01_transactions/01_place_order.sql`
-3.  `sql/02_analytics/01_customer_spending_report.sql`
-4.  `sql/03_inventory/01_low_stock_category_report.sql`
-5.  `sql/03_inventory/02_category_exceptions.sql`
-6.  `sql/03_inventory/03_inventory_reconciliation.sql`
+1. `sql/00_setup/01_sequences.sql`
+2. `sql/00_setup/02_stock_protection.sql`
+3. `sql/01_transactions/01_place_order.sql`
+4. `sql/02_analytics/01_customer_spending_report.sql`
+5. `sql/03_inventory/01_low_stock_category_report.sql`
+6. `sql/03_inventory/02_category_exceptions.sql`
+7. `sql/03_inventory/03_inventory_reconciliation.sql`
+8. `sql/03_inventory/04_adjust_inventory.sql`
+9. `sql/04_diagnostics/01_data_quality_exception_register.sql`
+10. `sql/04_diagnostics/02_scan_data_quality.sql`
+
+After creating the exception register and scanner, execute
+`CALL scan_data_quality_exceptions();` to populate the register.
 
 The original instructor files remain unchanged.
 
