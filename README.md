@@ -1,6 +1,6 @@
 # Kloud Kart Inventory & Order Management
 
-**SQL for Data Engineering – PostgreSQL Project**
+**SQL for Data Engineering â€“ PostgreSQL Project**
 
 ## 1. Project overview
 
@@ -45,7 +45,7 @@ Kloud-Kart-Inventory-Order-Management/
 |-- docs/
 |   |-- business_memo.md
 |   |-- data_quality_diagnosis.md
-|   `-- technical_decisions.md
+|   `-- adr/
 |-- reports/
 |   `-- concurrency_test_results.md
 |-- README.md
