@@ -28,6 +28,25 @@ The implemented diagnostic process scans the source tables and records findings 
 | Medium | Zero-quantity inventory movements | 90 inventory log records had `change_qty = 0`. | May represent no-op or incomplete audit entries; confirm whether these are valid before cleanup. |
 | Medium | Inventory reconciliation exceptions | 144 products did not match the zero-opening-balance reconciliation assumption. | Indicates a need to investigate opening balances or missing movements; it does not prove current stock is wrong. |
 
+The 14 products with negative stock are:
+
+| Product ID | Product | Stock |
+|---:|---|---:|
+| 5005 | LG Mice XL | -4 |
+| 5057 | Asus Fan | -4 |
+| 5322 | Midea Rice 3 | -2 |
+| 5391 | Unilever Keyboard Lite | -4 |
+| 6148 | Kasapreko Mice | -1 |
+| 6295 | JBL Kettle Mini | -1 |
+| 6392 | Tecno Blender 2 | -1 |
+| 6399 | Anker Sunscreen Max | -1 |
+| 7049 | Tecno Feature Phone 3 | -1 |
+| 7390 | Ideal Kettle Mini | -3 |
+| 8107 | JBL Speaker Mini | -2 |
+| 8353 | Infinix TV Accessorie | -1 |
+| 8659 | Zeepay Soft Drink 3 | -1 |
+| 8862 | Sunlight Women Accessorie 2 | -1 |
+
 ## 3. Detection Methods
 
 The issues were identified using SQL profiling, joins, aggregation, filters, and recursive queries:
@@ -52,7 +71,7 @@ The project implements three diagnostic database objects:
 - `record_data_quality_exception()`: Retained as an internal helper and not granted to application roles. The scanner performs a set-based batch upsert for repeated detections.
 - `scan_data_quality_exceptions()`: Scans the source tables and records the identified data-quality exceptions.
 
-The latest validated scanner results recorded **377,647 open exception records across 15 issue types**. The scanner implements 17 expected issue checks, of which 15 produced matching records and two produced none.
+The latest validated scanner results recorded **377,647 open exception records across 15 issue types**. The scanner implements 20 issue checks; 15 produced matching records and five produced none.
 
 | Issue type | Open records |
 |---|---:|
@@ -94,14 +113,14 @@ These findings are exceptions for investigation, not automatic proof of fraud or
 2. Zero-priced order items may represent promotions or free gifts.
 3. Large order quantities may be genuine bulk orders, although they warrant review.
 4. Zero-quantity inventory movements may be legitimate system or operational entries and should be investigated before removal.
-5. Inventory reconciliation assumes a zero opening balance. The original opening stock is not known, so mismatches must be investigated rather than automatically corrected.
-6. Status normalization requires confirmation from the business. The customer-spending report currently treats `completed`, `complete`, and `shipped` as eligible statuses. Pending, cancelled, and refunded orders are excluded.
+5. Inventory reconciliation assumes a zero opening balance. The original opening stock is not known, so neither `MATCHES_ZERO_OPENING_BALANCE_ASSUMPTION` nor a review status proves the true balance; mismatches must be investigated rather than automatically corrected.
+6. The project's fixed customer-spending policy treats `completed`, `complete`, and `shipped` as eligible; all other statuses are excluded. This makes project results reproducible, but production use still requires business-owner approval.
 7. The scanner identifies formatting variations in raw statuses, but it does not establish the correct business meaning of each status.
 8. An order-total mismatch is a reason for investigation, not automatic proof that the recorded total is wrong. Discounts, taxes, shipping, or other business rules may explain some differences.
 
 ## 6. Recommended Remediation Order
 
-1. Investigate negative stock and validate inventory balances.
+1. Investigate negative stock and validate inventory balances. After correcting the 14 listed products and confirming no negative rows remain, run `sql/00_setup/04_validate_stock_protection.sql` to validate the `NOT VALID` constraint.
 2. Resolve orphaned orders and order items, preserving source records.
 3. Review missing prices, zero-priced items, suspicious quantities, and order-total differences.
 4. Investigate orphaned inventory movements and improve inventory audit completeness.

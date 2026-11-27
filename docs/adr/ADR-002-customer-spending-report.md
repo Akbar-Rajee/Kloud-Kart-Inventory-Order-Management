@@ -10,7 +10,7 @@ The assignment describes a weekly customer-spending report that takes about 40 m
 
 ## Decision
 
-Create `customer_spending_report` using SQL aggregation, a generated month series, customer-month rows, and window functions for running totals and ranking. Retain customers with no eligible orders.
+Create `customer_spending_report` using SQL aggregation, a generated month series, customer-month rows, and window functions for running totals and ranking. Retain customers with no eligible orders. The fixed project reporting policy counts `completed`, `complete` and `shipped` as eligible; all other statuses are excluded. This is an assignment policy, not production approval.
 
 ## Alternatives considered
 
@@ -28,10 +28,10 @@ Create `customer_spending_report` using SQL aggregation, a generated month serie
 
 ## Consequences
 
-- **What this buys:** The required totals, counts, monthly spend, running totals, and ranking are calculated close to the source data. The report returned 525,460 rows for 40,420 customers across 13 month labels in approximately 1.90 seconds in the recorded execution plan.
+- **What this buys:** The required totals, counts, monthly spend, running totals, and ranking are calculated close to the source data. The report returned 525,460 rows for 40,420 customers across 13 month labels in approximately 1.90 seconds in the recorded execution plan. Adwoa should use `trailing_12_month_spend` for the exact rolling 12-month figure; the 13 monthly labels are its calendar-month breakdown, with partial boundary months.
 - **What this costs:** Each query computes results from source data; repeated runs still consume database resources. The current output includes 13 labels with partial boundary months.
-- **What it costs the client if I am wrong:** Incorrect status or date-window assumptions could misstate customer spend and ranking; a view may become too slow as data grows.
-- **What would make me revisit this:** Confirmed business definitions, materially larger data volumes, or production measurements showing repeated report execution is too costly.
+- **What it costs the client if I am wrong:** A production policy that differs from the declared assignment status set or date window could misstate customer spend and ranking; a view may become too slow as data grows.
+- **What would make me revisit this:** A business owner changing the status policy, materially larger data volumes, or production measurements showing repeated report execution is too costly.
 
 ## What this survives
 

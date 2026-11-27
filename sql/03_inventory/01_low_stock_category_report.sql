@@ -1,14 +1,19 @@
 -- ============================================================
 -- Kloud Kart: Low-stock report across category hierarchy
 --
--- Provisional low-stock threshold: 5 units.
+-- Project default low-stock threshold: 5 units.
+-- Change low_stock_settings.low_stock_threshold when policy changes.
 -- Products are reported against their own category and
 -- every reachable ancestor category.
 -- ============================================================
 
 CREATE OR REPLACE VIEW low_stock_category_report AS
 
-WITH RECURSIVE category_tree AS (
+WITH RECURSIVE low_stock_settings AS (
+    SELECT 5::INTEGER AS low_stock_threshold
+),
+
+category_tree AS (
 
     -- Start with root categories
     SELECT
@@ -34,15 +39,15 @@ WITH RECURSIVE category_tree AS (
 ),
 
 low_stock_products AS (
-
     SELECT
-        product_id,
-        product_name,
-        category_id,
-        stock_quantity
-    FROM products
-    WHERE stock_quantity <= 5
-      AND category_id IS NOT NULL
+        p.product_id,
+        p.product_name,
+        p.category_id,
+        p.stock_quantity
+    FROM products AS p
+    CROSS JOIN low_stock_settings AS settings
+    WHERE p.stock_quantity <= settings.low_stock_threshold
+      AND p.category_id IS NOT NULL
 )
 
 SELECT

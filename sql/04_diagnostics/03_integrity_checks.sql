@@ -1,6 +1,9 @@
 -- ============================================================
 -- Kloud Kart: Read-only integrity summary
 -- Run after schema load and project setup. This script does not repair data.
+-- This compact, independent snapshot intentionally overlaps selected scanner
+-- checks so operators can compare source-table counts without changing the
+-- persistent exception register or its investigation workflow.
 -- ============================================================
 
 SELECT 'negative_stock_products' AS check_name, COUNT(*) AS exception_count

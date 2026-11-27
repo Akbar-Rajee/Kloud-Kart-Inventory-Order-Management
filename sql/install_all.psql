@@ -1,0 +1,20 @@
+\set ON_ERROR_STOP on
+
+\echo 'Installing Kloud Kart project objects'
+\ir 00_setup/01_sequences.sql
+\ir 00_setup/02_stock_protection.sql
+\ir 00_setup/03_execution_roles.sql
+\ir 01_transactions/01_place_order.sql
+\ir 02_analytics/01_customer_spending_report.sql
+\ir 02_analytics/02_validate_customer_spending_report.sql
+\ir 03_inventory/01_low_stock_category_report.sql
+\ir 03_inventory/02_category_exceptions.sql
+\ir 03_inventory/03_inventory_reconciliation.sql
+\ir 03_inventory/04_adjust_inventory.sql
+\ir 04_diagnostics/01_data_quality_exception_register.sql
+\ir 04_diagnostics/02_scan_data_quality.sql
+CALL scan_data_quality_exceptions();
+\ir 05_security/01_roles_and_grants.sql
+\ir 05_security/02_application_role_smoke_tests.sql
+\ir 04_diagnostics/03_integrity_checks.sql
+\echo 'Installation and smoke checks completed'

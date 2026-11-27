@@ -35,4 +35,4 @@ Use a conditional `UPDATE` inside `place_order()` that deducts stock only when t
 
 ## What this survives
 
-The unmodified supplied race test passed 25/25 last-unit rounds. In the recorded flash-sale scenario, 400 buyers competed for 50 units: 50 succeeded, 350 were refused, no overselling or unexpected errors occurred, and the test completed in approximately 4.72 seconds. This is evidence for the supplied test scenario, not a guarantee for every production workload.
+The unmodified supplied race test passed 25/25 last-unit rounds. In the latest recorded flash-sale run, 400 buyers competed for 50 units: 50 succeeded, 350 were refused, no overselling or unexpected errors occurred, and the test completed in 3.53 seconds. The environment and earlier observations are documented in `reports/concurrency_test_results.md`. This is evidence for the supplied test scenario, not a guarantee for every production workload.

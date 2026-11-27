@@ -4,5 +4,6 @@ __pycache__/
 .env
 .env.*
 !.env.example
+*.bak
 
-# The assignment CSV fixtures are synthetic/authorised test data and are tracked.
+# The assignment CSV fixtures are synthetic/authorized test data and are tracked.

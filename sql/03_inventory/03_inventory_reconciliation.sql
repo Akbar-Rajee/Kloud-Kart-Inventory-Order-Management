@@ -36,7 +36,7 @@ SELECT
 
     CASE
         WHEN p.stock_quantity = COALESCE(lm.net_logged_change, 0)
-            THEN 'MATCHES_ZERO_OPENING_BALANCE'
+            THEN 'MATCHES_ZERO_OPENING_BALANCE_ASSUMPTION'
 
         ELSE 'REVIEW_OPENING_BALANCE_OR_MISSING_MOVEMENTS'
     END AS reconciliation_status

@@ -2,6 +2,7 @@
 Kloud Kart - Phase 1: Read-only database reconnaissance
 Run AFTER schema.sql and load.sql have completed successfully.
 This script does not modify, delete, or clean any records.
+It is a profiling snapshot; use the exception scanner for persistent tracking.
 */
 
 \echo '1. ROW COUNTS'

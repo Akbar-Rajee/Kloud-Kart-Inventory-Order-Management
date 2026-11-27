@@ -17,13 +17,14 @@ The implemented solution addresses the main operational requirements and has pas
 
 The new order-processing function prevents competing buyers from successfully purchasing the same remaining stock.
 
-In the supplied test, 400 buyers competed for 50 units: exactly 50 orders succeeded, 350 were refused, and no overselling occurred. The test completed in approximately 4.72 seconds.
+In the latest recorded supplied test, 400 buyers competed for 50 units: exactly 50 orders succeeded, 350 were refused, and no overselling occurred. The canonical observed duration was 3.53 seconds; the environment details are recorded in `reports/concurrency_test_results.md`.
 
 ### 2. Faster customer-spending reporting
 
 The customer-spending report completed in approximately 1.90 seconds in the test environment, returning 525,460 customer-month rows.
 
 It provides total spend, eligible order count, monthly spend, cumulative spend, spending rank and a top-100 indicator.
+For Adwoa's exact trailing-12-month figure, use `trailing_12_month_spend`; the monthly columns are a breakdown across 13 calendar-month labels, including partial boundary months.
 
 ### 3. Better low-stock visibility
 
@@ -64,8 +65,8 @@ Some apparent exceptions may have legitimate explanations. Duplicate email addre
 
 ## Decisions Requested
 
-1. Confirm which order statuses count as eligible customer spend, particularly whether `shipped` should be included.
-2. Confirm the treatment of cancelled, refunded and zero-priced orders.
+1. Before production use, approve or replace the project's explicit reporting policy: `completed`, `complete` and `shipped` count as eligible spend; all other statuses are excluded.
+2. Confirm the treatment of cancelled, refunded and zero-priced orders before changing the project policy.
 3. Approve investigation of negative stock and orphaned transaction records before historical corrections are applied.
 4. Confirm opening inventory balances so reconciliation differences can be assessed accurately.
 5. Consider adding a dedicated order reference column to the inventory log to strengthen audit traceability.

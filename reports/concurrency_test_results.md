@@ -6,9 +6,11 @@ Verify that the `place_order()` PostgreSQL function prevents overselling under c
 
 ## Test environment
 
-- Database: PostgreSQL 18
-- Application language: Python
-- Database driver: psycopg2 2.9.13
+- Host snapshot: Windows 11 Business 10.0.26300, Intel Core i7-10510U, 31.3 GiB RAM
+- Docker Engine: 29.9.3
+- Database image: `postgres:18@sha256:eece53c7c4410fb9c6556a19b8e0f2d61708a5893e2aa0a1e3c716661374ab18`
+- Test-runner image: `python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b`
+- Dependency pin for reruns: `psycopg2-binary==2.9.13` in `requirements.txt`
 - Test script: Original instructor-provided `race_test.py`
 - Test modifications: None
 
@@ -21,11 +23,11 @@ Verify that the `place_order()` PostgreSQL function prevents overselling under c
 | Request exceeding available stock | Passed: request refused and stock unchanged |
 | Inventory movement after successful purchases | Passed: 5 successful sales and 5 movements recorded |
 
-## Performance observation
+## Canonical performance observation
 
-The 400-buyer flash-sale test completed in 3.16 seconds during the full test-suite run.
+The latest full-suite run, recorded on 2026-11-27, completed the 400-buyer flash-sale test in **3.53 seconds**.
 
-A separate execution completed in 3.65 seconds. The README and ADR also record another execution at 4.72 seconds. These are three distinct observed runs, not conflicting measurements.
+Earlier runs measured 3.16, 3.65 and 4.72 seconds. Their detailed environment and driver versions were not captured, so 3.53 seconds is the sole canonical figure and the earlier values are historical observations only. The 3.53-second run installed `psycopg2-binary` without a version pin; the requirements file now pins the driver for future reruns.
 
 ## Conclusion
 

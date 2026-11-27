@@ -6,28 +6,21 @@ This checklist separates source review from database execution. A successful sta
 
 ## Clean deployment order
 
-1. Create a disposable PostgreSQL 18 database.
+1. Create a disposable PostgreSQL 18 database using the pinned image reference in the README.
 2. Run `M03_Resources/schema.sql`.
 3. Run `M03_Resources/load.sql` from the `M03_Resources` directory so relative CSV paths resolve.
-4. Run `sql/00_setup/01_sequences.sql`.
-5. Run `sql/00_setup/02_stock_protection.sql`.
-6. Run `sql/00_setup/03_execution_roles.sql`.
-7. Install `sql/01_transactions/01_place_order.sql`.
-8. Install both files in `sql/02_analytics/` in numerical order.
-9. Install all four files in `sql/03_inventory/` in numerical order.
-10. Install both files in `sql/04_diagnostics/` in numerical order.
-11. Call `scan_data_quality_exceptions()` and inspect exception counts.
-12. Run `sql/05_security/01_roles_and_grants.sql`.
-13. Run `sql/05_security/02_application_role_smoke_tests.sql`.
-14. Run `integrity_checks.sql` and the supplied concurrency test.
+4. Copy `sql/` into the container and run `sql/install_all.psql` with `psql -v ON_ERROR_STOP=1`.
+5. Run the supplied concurrency test using the pinned Python image and `requirements.txt`.
+6. After all negative historical stock balances have been investigated and corrected, run `sql/00_setup/04_validate_stock_protection.sql`.
 
-Use `psql -v ON_ERROR_STOP=1` for every SQL file. Run destructive schema setup only in the disposable database.
+Use `psql -v ON_ERROR_STOP=1` for every SQL file. Run destructive schema setup only in the disposable database. `04_validate_stock_protection.sql` is intentionally gated: it should fail with the outstanding product IDs until those balances are remediated, and pass only when no negative stock remains.
 
 ## Required runtime checks
 
-- Every SQL file completes without an error on PostgreSQL 18.
+- `install_all.psql` completes without an error on PostgreSQL 18.
 - Customer report validation completes without raising an exception.
 - The scanner can be called twice; the second run increases detection counts without creating duplicate exception keys.
+- The application-role smoke test completes after `install_all.psql` installs the roles.
 - Order and inventory routines work when invoked under their respective application roles, not only as `postgres`.
 - The order role cannot directly update products or insert orders.
 - The inventory role cannot directly update products or insert inventory movements.

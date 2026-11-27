@@ -19,10 +19,10 @@ The solution works with the supplied database schema and dataset. It does not re
 
 ## 2. Technology
 
-- PostgreSQL 18
+- PostgreSQL 18 (`postgres:18` image; reproducible image digest shown below)
 - Docker Desktop
-- Python 3
-- psycopg2
+- Python 3.12
+- `psycopg2-binary==2.9.13` (see `requirements.txt`)
 - PowerShell
 
 ## 3. Repository structure
@@ -35,10 +35,12 @@ Kloud-Kart-Inventory-Order-Management/
 |   |-- load.sql
 |   `-- race_test.py
 |-- sql/
+|   |-- install_all.psql
 |   |-- 00_setup/
 |   |   |-- 01_sequences.sql
 |   |   |-- 02_stock_protection.sql
-|   |   `-- 03_execution_roles.sql
+|   |   |-- 03_execution_roles.sql
+|   |   `-- 04_validate_stock_protection.sql
 |   |-- 01_transactions/
 |   |   `-- 01_place_order.sql
 |   |-- 02_analytics/
@@ -50,8 +52,10 @@ Kloud-Kart-Inventory-Order-Management/
 |   |   |-- 03_inventory_reconciliation.sql
 |   |   `-- 04_adjust_inventory.sql
 |   |-- 04_diagnostics/
+|   |   |-- 00_reconnaissance.sql
 |   |   |-- 01_data_quality_exception_register.sql
-|   |   `-- 02_scan_data_quality.sql
+|   |   |-- 02_scan_data_quality.sql
+|   |   `-- 03_integrity_checks.sql
 |   `-- 05_security/
 |       |-- 01_roles_and_grants.sql
 |       `-- 02_application_role_smoke_tests.sql
@@ -63,21 +67,40 @@ Kloud-Kart-Inventory-Order-Management/
 |   `-- adr/
 |-- reports/
 |   `-- concurrency_test_results.md
+|-- requirements.txt
 |-- README.md
-|-- 01_reconnaissance.sql
-|-- integrity_checks.sql
 `-- .gitignore
 ```
 
-The repository contains only maintained project files; temporary development backups are excluded from deployment.
+Local `.bak` development backups are excluded by the `*.bak` rule in [`.gitignore`](./.gitignore). The supplied fixture CSVs remain tracked project inputs.
 
 ## 4. Database setup and deployment
 
 The following instructions assume Docker is running and the PostgreSQL container is named `kloudkart`.
 
-### Step 0: Make the source files available inside the container
+### Step 0: Create a reproducible PostgreSQL container (first-time setup)
 
-The `docker exec -w /lab/M03_Resources` commands below assume the project directory has been mounted at `/lab/M03_Resources` in the `kloudkart` container. If it is not mounted, copy the resources from PowerShell first:
+From PowerShell at the repository root, populate `POSTGRES_PASSWORD` from a local secret source, then create the container. This mounts the supplied schema and CSVs read-only and persists database files in a named volume:
+
+```powershell
+# Set POSTGRES_PASSWORD from your local secret manager before this command.
+if ([string]::IsNullOrWhiteSpace($env:POSTGRES_PASSWORD)) { throw "Set POSTGRES_PASSWORD from a local secret source first." }
+docker run --name kloudkart -d `
+  --env POSTGRES_USER=postgres `
+  --env POSTGRES_DB=kloud_kart `
+  --env POSTGRES_PASSWORD `
+  --publish 5432:5432 `
+  --volume kloudkart_pgdata:/var/lib/postgresql/data `
+  --volume "${PWD}\M03_Resources:/lab/M03_Resources:ro" `
+  postgres:18@sha256:eece53c7c4410fb9c6556a19b8e0f2d61708a5893e2aa0a1e3c716661374ab18
+Remove-Item Env:POSTGRES_PASSWORD
+```
+
+This is a one-time container creation command. If `kloudkart` already exists, do not run it again; use the copy fallback below to refresh project files. The image digest pins the PostgreSQL image used for the recorded test environment.
+
+The setup commands use `postgres` as a database administrator for this lab. Production applications must connect through dedicated non-superuser roles; provide all credentials through a secret manager or protected environment variables, never in source control or a shared command transcript.
+
+If the existing container does not have the project files mounted, copy the source files from PowerShell:
 
 ```powershell
 docker exec kloudkart mkdir -p /lab/M03_Resources/data
@@ -87,8 +110,6 @@ docker cp .\M03_Resources\data\. kloudkart:/lab/M03_Resources/data/
 ```
 
 ### Step 1: Create the database schema
-
-From the project root:
 
 ```powershell
 docker exec -w /lab/M03_Resources kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f schema.sql
@@ -121,94 +142,30 @@ docker exec kloudkart mkdir -p /tmp/kloudkart_sql
 docker cp .\sql\. kloudkart:/tmp/kloudkart_sql/
 ```
 
-### Step 4: Install database objects in order
+### Step 4: Install and verify database objects in order
 
-Run the following commands after creating the original schema and loading the dataset.
-
-**4.1 Create sequences, stock protection and restricted execution-owner roles**
+After the original schema and data are loaded, run the single ordered driver:
 
 ```powershell
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/00_setup/01_sequences.sql
-
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/00_setup/02_stock_protection.sql
-
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/00_setup/03_execution_roles.sql
+docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/install_all.psql
 ```
 
-**4.2 Install transactional order processing**
+`install_all.psql` runs the ordered setup, transaction, analytics, inventory, diagnostics, role configuration and smoke-test scripts. It also calls the exception scanner and runs the read-only integrity summary. It stops on the first SQL error. It intentionally does not rebuild the original schema or validate the historical stock constraint.
+
+The driver requires a database administrator because it creates roles and assigns routine ownership. The four application roles and their responsibilities are listed once in [section 5.5](#55-database-security-and-least-privilege). Three restricted, non-login execution-owner roles are also created.
+
+For an optional read-only profile after loading the source data, run `04_diagnostics/00_reconnaissance.sql`; the persistent scanner and compact integrity summary are run by the installer.
+
+### Step 5: Validate historical stock protection after remediation
+
+The initial stock-protection constraint is `NOT VALID` because 14 historical products have negative stock. Investigate and correct those records only after business review. After the query below returns no rows, run the guarded validation script:
 
 ```powershell
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/01_transactions/01_place_order.sql
+docker exec kloudkart psql -U postgres -d kloud_kart -c "SELECT product_id, stock_quantity FROM products WHERE stock_quantity < 0 ORDER BY product_id;"
+docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/00_setup/04_validate_stock_protection.sql
 ```
 
-**4.3 Install customer analytics**
-
-```powershell
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/02_analytics/01_customer_spending_report.sql
-```
-
-**4.4 Install inventory reporting and adjustment routines**
-
-```powershell
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/03_inventory/01_low_stock_category_report.sql
-
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/03_inventory/02_category_exceptions.sql
-
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/03_inventory/03_inventory_reconciliation.sql
-
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/03_inventory/04_adjust_inventory.sql
-```
-
-**4.5 Install data-quality monitoring**
-
-```powershell
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/04_diagnostics/01_data_quality_exception_register.sql
-
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/04_diagnostics/02_scan_data_quality.sql
-```
-
-### Step 5: Validate the customer spending report
-
-```powershell
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/02_analytics/02_validate_customer_spending_report.sql
-```
-
-### Step 6: Populate the data-quality exception register
-
-After installing the diagnostic table and scanner procedure:
-
-```powershell
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -c "CALL scan_data_quality_exceptions();"
-```
-
-This scans the source tables and records detected exceptions without deleting or silently correcting the original records.
-
-### Step 7: Configure application roles and permissions
-
-Run this after all tables, views and routines have been installed:
-
-```powershell
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/05_security/01_roles_and_grants.sql
-```
-
-The script creates four non-login application roles and uses three dedicated non-login execution-owner roles. The execution-owner roles receive only the table and sequence privileges required by their respective routines. The privileged routines use `SECURITY DEFINER` with a pinned search path and are owned by these restricted roles.
-
-The script creates four non-login roles:
-
-- `kloudkart_reader`
-- `kloudkart_order_user`
-- `kloudkart_inventory_user`
-- `kloudkart_admin`
-
-It grants schema access, role-specific read permissions and restricted execution of the order, inventory and diagnostic routines. The administrator can update only the exception status, resolution timestamp and resolution note; it cannot delete exception records.
-
-Run the permission smoke tests after role configuration:
-
-```powershell
-docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/05_security/02_application_role_smoke_tests.sql
-```
-
-The script does not create application login accounts. Production login accounts should be provisioned separately and granted only the role memberships they require.
+The guard refuses validation and lists any remaining negative product IDs. Do not silently clamp or discard historical balances. Production login accounts should be provisioned separately and granted only the required application-role memberships.
 
 ## 5. Implemented solutions
 
@@ -245,20 +202,22 @@ The `customer_spending_report` view provides:
 - Customer spending rank.
 - Top-100 customer indicator.
 
-The report uses window functions and aggregation to calculate the customer metrics. Customers without eligible orders are retained in the report.
+The report uses window functions and aggregation to calculate the customer metrics. Customers without eligible orders are retained in the report. The project's fixed reporting policy includes statuses `completed`, `complete` and `shipped`; other statuses are excluded. This is an explicit assignment policy for reproducible results, not a claim of stakeholder approval for production.
 
-The business assumption is that `completed`, `complete` and `shipped` orders count as eligible spending. This should be confirmed with the business.
+For Adwoa's exact trailing-12-month figure, use `trailing_12_month_spend`. `monthly_spend` and `running_total` are the month-by-month breakdown of that same rolling interval. The grid has 13 calendar-month labels because the exact 12-month interval can begin and end partway through calendar months; the sum of `monthly_spend` reconciles to `trailing_12_month_spend`. `total_spent`, `order_count` and `spending_rank` are lifetime measures.
 
 ### 5.3 Inventory visibility and control
 
 The inventory implementation provides:
 
 - `low_stock_category_report`: low-stock products rolled up through category ancestors using a recursive query.
+- The project default low-stock threshold is 5 units, named in the view's `low_stock_settings.low_stock_threshold` CTE.
 - `product_category_exceptions`: products assigned to missing or unreachable categories.
 - `inventory_reconciliation_review`: inventory balances requiring reconciliation review.
 - `adjust_inventory()`: controlled restocking and stock corrections with explanatory notes and corresponding inventory movements.
 
 The category roll-up supports arbitrary hierarchy depth and includes cycle protection.
+The reconciliation status `MATCHES_ZERO_OPENING_BALANCE_ASSUMPTION` means only that current stock equals net logged movement under a zero-opening-balance assumption; it is not proof of a verified match.
 
 The adjustment function rejects zero quantity changes, invalid movement reasons, missing notes and adjustments that would produce negative stock.
 
@@ -307,7 +266,7 @@ The supplied, unmodified `race_test.py` passed:
 - Zero overselling and zero errors.
 - Five successful sales with five corresponding inventory movements in the audit test.
 
-Flash-sale test execution time: **4.72 seconds**.
+Canonical flash-sale observation: **3.53 seconds** in the latest recorded full-suite run. Earlier timings are retained as historical observations in [`reports/concurrency_test_results.md`](reports/concurrency_test_results.md); they are not competing canonical results.
 
 These results demonstrate that the order function protects stock under concurrent requests in the supplied test environment.
 
@@ -352,7 +311,7 @@ The restored dataset produced:
 - 144 inventory reconciliation review exceptions.
 - 521 low-stock products under Electronics.
 
-The reconciliation exceptions require business review because the supplied dataset does not establish a verified opening-stock balance.
+The reconciliation exceptions require business review because the supplied dataset does not establish a verified opening-stock balance. Equality with net logged movements is labeled as matching only under the zero-opening-balance assumption.
 
 ### 6.5 Data-quality scanner performance
 
@@ -382,11 +341,11 @@ For the full release checklist and role-level verification requirements, see [`d
 
 ## 7. Assumptions and limitations
 
-- Eligible spending statuses are `completed`, `complete` and `shipped`. The business should confirm the treatment of cancelled, refunded and other status variants.
-- The report generates 13 monthly labels, from the month containing the date 12 months ago through the current month. The first and last months may be partial. The separate trailing 12-month metric is calculated for each customer.
+- The project's fixed reporting policy counts `completed`, `complete` and `shipped` as eligible spending; all other statuses are excluded. Production use requires the business owner to approve or replace this explicit project policy.
+- The report generates 13 calendar-month labels for an exact rolling 12-month interval. The first and current-month labels can be partial. Use `trailing_12_month_spend` for Adwoa's single trailing-12-month figure; the monthly columns are its breakdown.
 - The reconciliation view is indicative because the supplied dataset does not establish a verified opening-stock balance.
 - The inventory log does not contain a dedicated order ID column. The implemented order function records the order ID in the movement note.
-- The stock protection CHECK constraint is initially `NOT VALID` because 14 historical products have negative stock. It enforces the constraint for new inserts and updates while those historical exceptions remain under investigation.
+- The stock protection CHECK constraint is initially `NOT VALID` because 14 historical products have negative stock. It enforces the constraint for new inserts and updates while those historical exceptions remain under investigation. Their IDs and balances are listed in [`docs/data_quality_diagnosis.md`](docs/data_quality_diagnosis.md). After they are investigated and corrected, run `sql/00_setup/04_validate_stock_protection.sql` to validate the constraint.
 - The data-quality register records original snapshots and detection metadata; it is not a complete change-history system.
 - Performance measurements reflect the supplied dataset and local Docker environment. They are not a production SLA.
 - Category exceptions are reported rather than automatically corrected because appropriate category assignments require business validation.
@@ -394,13 +353,26 @@ For the full release checklist and role-level verification requirements, see [`d
 
 ## 8. Running the supplied concurrency test
 
-From the project root, with the Python environment configured:
+The test reads `DATABASE_URL` from the process environment. Keep the connection string in a local secret manager or an ignored `.env` file; do not put a real password in source code or a command-history entry. The original instructor script's inline DSN is illustrative only. For a local `.env` containing only the connection string, load it in PowerShell with:
 
 ```powershell
+$env:DATABASE_URL = (Get-Content .\.env -Raw).Trim()
+python -m pip install -r .\requirements.txt
 python .\M03_Resources\race_test.py
 ```
 
-The instructor's test script is used without modification.
+For a Dockerized test runner, run from the project root after setting `DATABASE_URL` to use `host.docker.internal` and the published PostgreSQL port:
+
+```powershell
+docker run --rm `
+  --mount "type=bind,source=$($PWD.Path),target=/workspace,readonly" `
+  --workdir /workspace `
+  --env DATABASE_URL `
+  python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b `
+  sh -c "python -m pip install --no-cache-dir -r requirements.txt && python M03_Resources/race_test.py"
+```
+
+The instructor's test script is used without modification. It creates and removes fixture rows; use a test database, not production.
 
 ## 9. Business outcome
 

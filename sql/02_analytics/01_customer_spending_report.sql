@@ -13,10 +13,10 @@
 --   13 calendar months (partial first and current months).
 --   Monthly amounts and running_total cover only that interval.
 --
--- Business assumption:
---   completed, complete and shipped are treated as eligible.
---   Pending, cancelled/canceled and refunded orders are excluded.
---   Status mapping requires business approval.
+-- Project reporting policy:
+--   completed, complete and shipped are eligible statuses.
+--   All other statuses are excluded for reproducible project results.
+--   Production use requires business-owner approval of this policy.
 --
 -- Ranking:
 --   Lifetime spend, descending; customer_id ascending breaks ties.
