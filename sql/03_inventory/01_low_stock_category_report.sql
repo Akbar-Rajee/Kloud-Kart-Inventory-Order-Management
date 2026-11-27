@@ -1,4 +1,4 @@
-﻿-- ============================================================
+-- ============================================================
 -- Kloud Kart: Low-stock report across category hierarchy
 --
 -- Provisional low-stock threshold: 5 units.

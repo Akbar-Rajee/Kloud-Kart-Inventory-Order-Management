@@ -49,7 +49,7 @@ The issues were identified using SQL profiling, joins, aggregation, filters, and
 The project implements three diagnostic database objects:
 
 - `data_quality_exceptions`: Stores one current exception record per source table, source record ID, and issue type. It includes original source values as JSONB, first and last detection timestamps, detection count, investigation status, and resolution information.
-- `record_data_quality_exception()`: Inserts new exceptions or updates detection metadata when an existing issue is detected again.
+- `record_data_quality_exception()`: Retained as an internal helper and not granted to application roles. The scanner performs a set-based batch upsert for repeated detections.
 - `scan_data_quality_exceptions()`: Scans the source tables and records the identified data-quality exceptions.
 
 The latest validated scanner results recorded **377,647 open exception records across 15 issue types**. The scanner implements 17 expected issue checks, of which 15 produced matching records and two produced none.
@@ -72,7 +72,7 @@ The latest validated scanner results recorded **377,647 open exception records a
 | Unreachable categories | 3 |
 | Categories with missing parents | 1 |
 
-The two checks with no matching records were `ORDER_ITEM_PRODUCT_MISSING` and `PRODUCT_CATEGORY_NOT_FOUND`.
+The five checks with no matching records were `ORDER_ITEM_PRODUCT_MISSING`, `PRODUCT_CATEGORY_NOT_FOUND`, `ORDER_ITEM_QUANTITY_NONPOSITIVE`, `ORDER_ITEM_UNIT_PRICE_NEGATIVE` and `PRODUCT_PRICE_NEGATIVE`.
 
 The counts represent exception records, not necessarily distinct business incidents. For example, the 1,068 duplicate-email exceptions represent implicated customer records across 533 duplicate groups.
 

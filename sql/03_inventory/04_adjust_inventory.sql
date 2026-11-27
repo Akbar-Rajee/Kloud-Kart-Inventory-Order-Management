@@ -1,4 +1,4 @@
-﻿-- ============================================================
+-- ============================================================
 -- Kloud Kart: Controlled inventory adjustments
 --
 -- Records restocks and stock corrections.
@@ -17,6 +17,8 @@ RETURNS TABLE (
     message TEXT
 )
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
     v_new_stock INTEGER;
@@ -59,7 +61,7 @@ BEGIN
     -- Confirm that the product exists.
     IF NOT EXISTS (
         SELECT 1
-        FROM products p
+        FROM public.products p
         WHERE p.product_id = p_product_id
     ) THEN
         RETURN QUERY
@@ -69,11 +71,12 @@ BEGIN
     END IF;
 
     -- Atomically update stock, preventing a negative balance.
-    UPDATE products
-    SET stock_quantity = stock_quantity + p_change_qty
+    UPDATE public.products
+    SET stock_quantity = (stock_quantity::NUMERIC + p_change_qty::NUMERIC)::INTEGER
     WHERE product_id = p_product_id
       AND stock_quantity IS NOT NULL
-      AND stock_quantity + p_change_qty >= 0
+      AND stock_quantity::NUMERIC + p_change_qty::NUMERIC
+          BETWEEN 0 AND 2147483647
     RETURNING stock_quantity INTO v_new_stock;
 
     IF NOT FOUND THEN
@@ -84,7 +87,7 @@ BEGIN
     END IF;
 
     -- Record the corresponding inventory movement.
-    INSERT INTO inventory_log (
+    INSERT INTO public.inventory_log (
         product_id,
         change_qty,
         reason,
@@ -107,3 +110,4 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.adjust_inventory(bigint, integer, text, text) FROM PUBLIC;

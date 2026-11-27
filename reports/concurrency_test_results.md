@@ -25,7 +25,7 @@ Verify that the `place_order()` PostgreSQL function prevents overselling under c
 
 The 400-buyer flash-sale test completed in 3.16 seconds during the full test-suite run.
 
-A separate execution completed in 3.65 seconds.
+A separate execution completed in 3.65 seconds. The README and ADR also record another execution at 4.72 seconds. These are three distinct observed runs, not conflicting measurements.
 
 ## Conclusion
 

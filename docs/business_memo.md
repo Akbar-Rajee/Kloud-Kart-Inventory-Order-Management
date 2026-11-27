@@ -1,4 +1,4 @@
-﻿# Business Memo
+# Business Memo
 
 **To:** Nana Adjei, Operations Manager
 **From:** Kloud Kart Data Engineering Project Team

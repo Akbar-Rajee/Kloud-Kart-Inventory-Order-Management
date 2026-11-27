@@ -1,8 +1,10 @@
-﻿-- ============================================================
+-- ============================================================
 -- Kloud Kart: ID sequence setup
 -- Run AFTER schema.sql and load.sql.
 -- Run BEFORE accepting new orders.
 -- ============================================================
+
+BEGIN;
 
 -- Orders
 CREATE SEQUENCE IF NOT EXISTS orders_order_id_seq;
@@ -53,3 +55,5 @@ SELECT setval(
 
 ALTER SEQUENCE inventory_log_log_id_seq
     OWNED BY inventory_log.log_id;
+
+COMMIT;

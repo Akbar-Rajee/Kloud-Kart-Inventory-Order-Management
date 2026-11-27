@@ -10,6 +10,8 @@
 \set ON_ERROR_STOP on
 \timing on
 
+BEGIN;
+
 \copy categories    (category_id, category_name, parent_id)                                  FROM 'data/categories.csv'    WITH (FORMAT csv, HEADER true, NULL '')
 \copy products      (product_id, product_name, category_id, price, stock_quantity, created_at) FROM 'data/products.csv'      WITH (FORMAT csv, HEADER true, NULL '')
 \copy customers     (customer_id, full_name, email, phone, city, registered_at)              FROM 'data/customers.csv'     WITH (FORMAT csv, HEADER true, NULL '')
@@ -18,6 +20,8 @@
 \copy inventory_log (log_id, product_id, change_qty, reason, created_at, note)               FROM 'data/inventory_log.csv' WITH (FORMAT csv, HEADER true, NULL '')
 
 ANALYZE;
+
+COMMIT;
 
 SELECT 'categories'    AS table_name, count(*) FROM categories
 UNION ALL SELECT 'products',      count(*) FROM products

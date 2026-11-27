@@ -1,4 +1,4 @@
-﻿-- ============================================================
+-- ============================================================
 -- Kloud Kart: Safe order placement
 --
 -- Prevents overselling through an atomic conditional UPDATE.
@@ -17,6 +17,8 @@ RETURNS TABLE (
     message TEXT
 )
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
     v_order_id BIGINT;
@@ -33,7 +35,7 @@ BEGIN
     -- Validate customer
     IF NOT EXISTS (
         SELECT 1
-        FROM customers c
+        FROM public.customers c
         WHERE c.customer_id = p_customer_id
     ) THEN
         RETURN QUERY
@@ -44,7 +46,7 @@ BEGIN
     -- Validate product
     IF NOT EXISTS (
         SELECT 1
-        FROM products p
+        FROM public.products p
         WHERE p.product_id = p_product_id
     ) THEN
         RETURN QUERY
@@ -55,7 +57,7 @@ BEGIN
     -- Atomically reserve stock.
     -- Concurrent transactions must re-check this condition
     -- after waiting for the product row lock.
-    UPDATE products
+    UPDATE public.products
     SET stock_quantity = stock_quantity - p_quantity
     WHERE product_id = p_product_id
       AND stock_quantity >= p_quantity
@@ -67,7 +69,7 @@ BEGIN
     IF NOT FOUND THEN
         IF EXISTS (
             SELECT 1
-            FROM products p
+            FROM public.products p
             WHERE p.product_id = p_product_id
               AND p.stock_quantity >= p_quantity
               AND p.price IS NULL
@@ -84,7 +86,7 @@ BEGIN
     END IF;
 
     -- Create the order
-    INSERT INTO orders (
+    INSERT INTO public.orders (
         customer_id,
         order_date,
         status,
@@ -96,10 +98,10 @@ BEGIN
         'Pending',
         v_price * p_quantity
     )
-    RETURNING orders.order_id INTO v_order_id;
+    RETURNING order_id INTO v_order_id;
 
     -- Create the order item
-    INSERT INTO order_items (
+    INSERT INTO public.order_items (
         order_id,
         product_id,
         quantity,
@@ -113,7 +115,7 @@ BEGIN
     );
 
     -- Record the inventory movement
-    INSERT INTO inventory_log (
+    INSERT INTO public.inventory_log (
         product_id,
         change_qty,
         reason,
@@ -134,3 +136,5 @@ BEGIN
     RETURN;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.place_order(bigint, bigint, integer) FROM PUBLIC;

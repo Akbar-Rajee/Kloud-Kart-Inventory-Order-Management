@@ -1,4 +1,4 @@
-﻿-- ============================================================
+-- ============================================================
 -- Kloud Kart: Inventory reconciliation review
 --
 -- Compares current product stock with net inventory movements.

@@ -2,6 +2,8 @@
 --
 -- The schema the business grew on, reproduced as-is.
 
+BEGIN;
+
 DROP TABLE IF EXISTS order_items, orders, inventory_log, products, customers, categories CASCADE;
 
 CREATE TABLE categories (
@@ -55,3 +57,5 @@ CREATE TABLE inventory_log (
 
 -- No indexes beyond the primary keys, and no foreign keys. That is the current
 -- state of the database, not an omission in this file.
+
+COMMIT;

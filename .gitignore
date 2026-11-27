@@ -5,5 +5,4 @@ __pycache__/
 .env.*
 !.env.example
 
-# Instructor dataset - do not commit customer data
-M03_Resources/data/*.csv
+# The assignment CSV fixtures are synthetic/authorised test data and are tracked.

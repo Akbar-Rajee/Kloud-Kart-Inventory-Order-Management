@@ -1,6 +1,6 @@
 # Kloud Kart Inventory & Order Management
 
-**SQL for Data Engineering â€“ PostgreSQL Project**
+**SQL for Data Engineering – PostgreSQL Project**
 
 ## 1. Project overview
 
@@ -36,15 +36,30 @@ Kloud-Kart-Inventory-Order-Management/
 |   `-- race_test.py
 |-- sql/
 |   |-- 00_setup/
+|   |   |-- 01_sequences.sql
+|   |   |-- 02_stock_protection.sql
+|   |   `-- 03_execution_roles.sql
 |   |-- 01_transactions/
+|   |   `-- 01_place_order.sql
 |   |-- 02_analytics/
+|   |   |-- 01_customer_spending_report.sql
+|   |   `-- 02_validate_customer_spending_report.sql
 |   |-- 03_inventory/
+|   |   |-- 01_low_stock_category_report.sql
+|   |   |-- 02_category_exceptions.sql
+|   |   |-- 03_inventory_reconciliation.sql
+|   |   `-- 04_adjust_inventory.sql
 |   |-- 04_diagnostics/
+|   |   |-- 01_data_quality_exception_register.sql
+|   |   `-- 02_scan_data_quality.sql
 |   `-- 05_security/
-|       `-- 01_roles_and_grants.sql
+|       |-- 01_roles_and_grants.sql
+|       `-- 02_application_role_smoke_tests.sql
 |-- docs/
 |   |-- business_memo.md
 |   |-- data_quality_diagnosis.md
+|   |-- improvement_beyond_brief.md
+|   |-- quality_assurance.md
 |   `-- adr/
 |-- reports/
 |   `-- concurrency_test_results.md
@@ -54,11 +69,22 @@ Kloud-Kart-Inventory-Order-Management/
 `-- .gitignore
 ```
 
-The `_customer_report_fix` directory contains intermediate report-development files. It is not part of the deployment sequence.
+The repository contains only maintained project files; temporary development backups are excluded from deployment.
 
 ## 4. Database setup and deployment
 
 The following instructions assume Docker is running and the PostgreSQL container is named `kloudkart`.
+
+### Step 0: Make the source files available inside the container
+
+The `docker exec -w /lab/M03_Resources` commands below assume the project directory has been mounted at `/lab/M03_Resources` in the `kloudkart` container. If it is not mounted, copy the resources from PowerShell first:
+
+```powershell
+docker exec kloudkart mkdir -p /lab/M03_Resources/data
+docker cp .\M03_Resources\schema.sql kloudkart:/lab/M03_Resources/schema.sql
+docker cp .\M03_Resources\load.sql kloudkart:/lab/M03_Resources/load.sql
+docker cp .\M03_Resources\data\. kloudkart:/lab/M03_Resources/data/
+```
 
 ### Step 1: Create the database schema
 
@@ -85,7 +111,7 @@ The supplied dataset contains:
 | order_items | 336,559 |
 | inventory_log | 282,352 |
 
-**Important:** `schema.sql` drops and recreates the original tables. Only run it when intentionally rebuilding the database. Do not run it against a database whose existing data must be preserved.
+**Important:** `schema.sql` drops and recreates the original tables. Only run it when intentionally rebuilding the database. Do not run it against a database whose existing data must be preserved. The CSV loader runs in one transaction; a failed import rolls back the complete load. Setup sequences and the stock-protection constraint are safe to rerun.
 
 ### Step 3: Copy the project SQL into the container
 
@@ -99,12 +125,14 @@ docker cp .\sql\. kloudkart:/tmp/kloudkart_sql/
 
 Run the following commands after creating the original schema and loading the dataset.
 
-**4.1 Create sequences and stock protection**
+**4.1 Create sequences, stock protection and restricted execution-owner roles**
 
 ```powershell
 docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/00_setup/01_sequences.sql
 
 docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/00_setup/02_stock_protection.sql
+
+docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/00_setup/03_execution_roles.sql
 ```
 
 **4.2 Install transactional order processing**
@@ -139,9 +167,15 @@ docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/
 docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/04_diagnostics/02_scan_data_quality.sql
 ```
 
-### Step 5: Populate the data-quality exception register
+### Step 5: Validate the customer spending report
 
-After installing the diagnostic table, function and scanner:
+```powershell
+docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/02_analytics/02_validate_customer_spending_report.sql
+```
+
+### Step 6: Populate the data-quality exception register
+
+After installing the diagnostic table and scanner procedure:
 
 ```powershell
 docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -c "CALL scan_data_quality_exceptions();"
@@ -149,13 +183,15 @@ docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -c "CALL
 
 This scans the source tables and records detected exceptions without deleting or silently correcting the original records.
 
-### Step 6: Configure application roles and permissions
+### Step 7: Configure application roles and permissions
 
 Run this after all tables, views and routines have been installed:
 
 ```powershell
 docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/05_security/01_roles_and_grants.sql
 ```
+
+The script creates four non-login application roles and uses three dedicated non-login execution-owner roles. The execution-owner roles receive only the table and sequence privileges required by their respective routines. The privileged routines use `SECURITY DEFINER` with a pinned search path and are owned by these restricted roles.
 
 The script creates four non-login roles:
 
@@ -164,7 +200,13 @@ The script creates four non-login roles:
 - `kloudkart_inventory_user`
 - `kloudkart_admin`
 
-It grants schema access, role-specific read permissions and restricted execution of the order, inventory and diagnostic routines.
+It grants schema access, role-specific read permissions and restricted execution of the order, inventory and diagnostic routines. The administrator can update only the exception status, resolution timestamp and resolution note; it cannot delete exception records.
+
+Run the permission smoke tests after role configuration:
+
+```powershell
+docker exec kloudkart psql -U postgres -d kloud_kart -v ON_ERROR_STOP=1 -f /tmp/kloudkart_sql/05_security/02_application_role_smoke_tests.sql
+```
 
 The script does not create application login accounts. Production login accounts should be provisioned separately and granted only the role memberships they require.
 
@@ -188,7 +230,7 @@ The conditional update is the central overselling protection. PostgreSQL row-lev
 
 The function also creates the order, order item and corresponding inventory movement within the same transaction. If an order cannot be fulfilled, the transaction does not leave partial order records or inventory changes.
 
-The function is implemented as a restricted `SECURITY DEFINER` routine with a controlled search path and limited execution permissions.
+The function is implemented as a `SECURITY DEFINER` routine owned by a dedicated non-login role with narrowly scoped table and sequence permissions, a pinned search path, and limited application-role execution.
 
 ### 5.2 Customer spending analytics
 
@@ -227,10 +269,10 @@ Sales, restocks and corrections are represented in the inventory movement audit 
 The diagnostic implementation provides:
 
 - `data_quality_exceptions`: persistent exception register storing original row values as JSONB, issue types, detection timestamps, detection counts and investigation status.
-- `record_data_quality_exception()`: records new exceptions and updates detection metadata when existing issues are detected again.
+- `record_data_quality_exception()`: retained as an internal helper; it is not exposed to application roles. The scanner performs a set-based batch upsert for performance.
 - `scan_data_quality_exceptions()`: scans source tables for identified data-quality problems and records the findings.
 
-The register preserves the first captured source snapshot. It does not automatically resolve an exception when an issue disappears; resolution requires investigation.
+The register preserves the first captured source snapshot. It does not automatically resolve an exception when an issue disappears; resolution requires investigation. The scanner monitors 20 issue types, including negative prices and nonpositive order-item quantities.
 
 ### 5.5 Database security and least privilege
 
@@ -326,12 +368,17 @@ The original row-by-row scanner exceeded 10 minutes and was cancelled. The optim
 | New exception rows on first optimized scan | 2,279 |
 | Duplicate exception keys after repeat scan | 0 |
 
-The scanner contains 17 expected checks. Two checks returned no matching records in this dataset:
+The scanner contains 20 issue types. Five checks returned no matching records in this dataset:
 
 - `ORDER_ITEM_PRODUCT_MISSING`
 - `PRODUCT_CATEGORY_NOT_FOUND`
+- `ORDER_ITEM_QUANTITY_NONPOSITIVE`
+- `ORDER_ITEM_UNIT_PRICE_NEGATIVE`
+- `PRODUCT_PRICE_NEGATIVE`
 
 The original scan was cancelled, so an exact like-for-like speedup ratio is not claimed. The optimized scanner completed successfully, and repeated execution did not create duplicate exception records.
+
+For the full release checklist and role-level verification requirements, see [`docs/quality_assurance.md`](docs/quality_assurance.md).
 
 ## 7. Assumptions and limitations
 
