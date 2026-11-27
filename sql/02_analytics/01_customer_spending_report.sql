@@ -1,125 +1,122 @@
-﻿-- ============================================================
+-- ============================================================
 -- Kloud Kart: Customer spending report
 --
--- Includes:
--- 1. All customers, including customers with no eligible orders.
--- 2. Total spend and eligible order count.
--- 3. Monthly spend over the trailing 12 months.
--- 4. Running cumulative spend by customer.
--- 5. Customer spending rank and top-100 flag.
+-- Lifetime measures:
+--   total_spent, order_count and spending_rank use ALL eligible
+--   orders dated on or before today.
+--
+-- Rolling-period measures:
+--   trailing_12_month_spend uses the exact rolling 12-month
+--   interval [CURRENT_DATE - 12 months, CURRENT_DATE + 1 day).
+--   The monthly grid deliberately contains 13 calendar-month
+--   labels because an exact rolling 12-month interval can touch
+--   13 calendar months (partial first and current months).
+--   Monthly amounts and running_total cover only that interval.
 --
 -- Business assumption:
--- completed, complete, and shipped orders count as spend.
--- Pending, cancelled, and refunded orders are excluded.
+--   completed, complete and shipped are treated as eligible.
+--   Pending, cancelled/canceled and refunded orders are excluded.
+--   Status mapping requires business approval.
 --
--- Date assumption:
--- The rolling 12-month period is anchored to CURRENT_DATE.
--- The monthly grid includes the current month and the month
--- containing the date 12 months ago (13 month labels).
+-- Ranking:
+--   Lifetime spend, descending; customer_id ascending breaks ties.
+--   ROW_NUMBER guarantees exactly 100 top-ranked customers when
+--   at least 100 customers exist.
 -- ============================================================
 
 CREATE OR REPLACE VIEW customer_spending_report AS
 
 WITH eligible_orders AS (
-
     SELECT
         o.order_id,
         o.customer_id,
         o.order_date,
         o.total_amount
-    FROM orders o
-    WHERE LOWER(TRIM(o.status))
-              IN ('completed', 'complete', 'shipped')
-      AND o.order_date >= CURRENT_DATE - INTERVAL '12 months'
+    FROM orders AS o
+    WHERE LOWER(TRIM(o.status)) IN ('completed', 'complete', 'shipped')
       AND o.order_date < CURRENT_DATE + INTERVAL '1 day'
 ),
 
-customer_totals AS (
-
+lifetime_totals AS (
     SELECT
         customer_id,
-        SUM(total_amount) AS total_spent,
-        COUNT(*) AS order_count
+        COALESCE(SUM(total_amount), 0)::numeric AS total_spent,
+        COUNT(*)::bigint AS order_count
     FROM eligible_orders
     GROUP BY customer_id
 ),
 
-monthly_spend AS (
-
+rolling_monthly_spend AS (
     SELECT
         customer_id,
         DATE_TRUNC('month', order_date)::date AS spend_month,
-        SUM(total_amount) AS monthly_spend
+        SUM(total_amount)::numeric AS monthly_spend
     FROM eligible_orders
-    GROUP BY
+    WHERE order_date >= CURRENT_DATE - INTERVAL '12 months'
+    GROUP BY customer_id, DATE_TRUNC('month', order_date)::date
+),
+
+rolling_totals AS (
+    SELECT
         customer_id,
-        DATE_TRUNC('month', order_date)::date
+        COALESCE(SUM(total_amount), 0)::numeric
+            AS trailing_12_month_spend
+    FROM eligible_orders
+    WHERE order_date >= CURRENT_DATE - INTERVAL '12 months'
+    GROUP BY customer_id
 ),
 
 report_months AS (
-
     SELECT GENERATE_SERIES(
-        DATE_TRUNC(
-            'month',
-            CURRENT_DATE - INTERVAL '12 months'
-        ),
+        DATE_TRUNC('month', CURRENT_DATE - INTERVAL '12 months'),
         DATE_TRUNC('month', CURRENT_DATE),
         INTERVAL '1 month'
     )::date AS spend_month
 ),
 
 ranked_customers AS (
-
     SELECT
         c.customer_id,
         c.full_name,
-
-        COALESCE(ct.total_spent, 0) AS total_spent,
-
-        COALESCE(ct.order_count, 0) AS order_count,
-
-        RANK() OVER (
-            ORDER BY COALESCE(ct.total_spent, 0) DESC
+        COALESCE(lt.total_spent, 0)::numeric AS total_spent,
+        COALESCE(lt.order_count, 0)::bigint AS order_count,
+        COALESCE(rt.trailing_12_month_spend, 0)::numeric
+            AS trailing_12_month_spend,
+        ROW_NUMBER() OVER (
+            ORDER BY COALESCE(lt.total_spent, 0) DESC, c.customer_id ASC
         ) AS spending_rank
-
-    FROM customers c
-
-    LEFT JOIN customer_totals ct
-        ON ct.customer_id = c.customer_id
+    FROM customers AS c
+    LEFT JOIN lifetime_totals AS lt
+        ON lt.customer_id = c.customer_id
+    LEFT JOIN rolling_totals AS rt
+        ON rt.customer_id = c.customer_id
 ),
 
 customer_month_grid AS (
-
     SELECT
         rc.customer_id,
         rc.full_name,
         rc.total_spent,
         rc.order_count,
+        rc.trailing_12_month_spend,
         rc.spending_rank,
         rm.spend_month,
-
-        COALESCE(ms.monthly_spend, 0) AS monthly_spend
-
-    FROM ranked_customers rc
-
-    CROSS JOIN report_months rm
-
-    LEFT JOIN monthly_spend ms
+        COALESCE(ms.monthly_spend, 0)::numeric AS monthly_spend
+    FROM ranked_customers AS rc
+    CROSS JOIN report_months AS rm
+    LEFT JOIN rolling_monthly_spend AS ms
         ON ms.customer_id = rc.customer_id
        AND ms.spend_month = rm.spend_month
 ),
 
 final_report AS (
-
     SELECT
         *,
-
         SUM(monthly_spend) OVER (
             PARTITION BY customer_id
             ORDER BY spend_month
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        ) AS running_total
-
+        )::numeric AS running_total
     FROM customer_month_grid
 )
 
@@ -132,6 +129,6 @@ SELECT
     spend_month,
     monthly_spend,
     running_total,
-    (spending_rank <= 100) AS is_top_100
-
+    (spending_rank <= 100) AS is_top_100,
+    trailing_12_month_spend
 FROM final_report;

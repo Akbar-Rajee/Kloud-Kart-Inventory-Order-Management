@@ -1,11 +1,8 @@
-﻿CREATE OR REPLACE PROCEDURE scan_data_quality_exceptions()
+CREATE OR REPLACE PROCEDURE scan_data_quality_exceptions()
 LANGUAGE plpgsql
 AS $$
-DECLARE
-    r RECORD;
 BEGIN
-    FOR r IN
-        WITH RECURSIVE reachable(category_id, path) AS (
+    WITH RECURSIVE reachable(category_id, path) AS (
             SELECT category_id, ARRAY[category_id]
             FROM categories
             WHERE parent_id IS NULL
@@ -26,6 +23,16 @@ BEGIN
               AND BTRIM(email) <> ''
             GROUP BY LOWER(BTRIM(email))
             HAVING COUNT(*) > 1
+        ),
+        order_item_totals AS (
+            SELECT
+                oi.order_id,
+                COUNT(*)::INTEGER AS line_item_count,
+                COUNT(oi.quantity)::INTEGER AS quantity_count,
+                COUNT(oi.unit_price)::INTEGER AS unit_price_count,
+                SUM(oi.quantity::NUMERIC * oi.unit_price) AS calculated_total
+            FROM order_items oi
+            GROUP BY oi.order_id
         ),
         exceptions AS (
             SELECT
@@ -86,6 +93,20 @@ BEGIN
 
             SELECT
                 'order_items', oi.order_item_id::TEXT,
+                'ORDER_ITEM_PRODUCT_MISSING',
+                TO_JSONB(oi)
+            FROM order_items oi
+            WHERE oi.product_id IS NULL
+               OR NOT EXISTS (
+                   SELECT 1
+                   FROM products p
+                   WHERE p.product_id = oi.product_id
+               )
+
+            UNION ALL
+
+            SELECT
+                'order_items', oi.order_item_id::TEXT,
                 'ORDER_ITEM_UNIT_PRICE_NULL',
                 TO_JSONB(oi)
             FROM order_items oi
@@ -108,6 +129,25 @@ BEGIN
                 TO_JSONB(oi)
             FROM order_items oi
             WHERE oi.quantity >= 999
+
+            UNION ALL
+
+            SELECT
+                'orders', o.order_id::TEXT,
+                'ORDER_TOTAL_MISMATCH',
+                TO_JSONB(o) || JSONB_BUILD_OBJECT(
+                    'calculated_items_total', totals.calculated_total,
+                    'total_difference', o.total_amount - totals.calculated_total,
+                    'line_item_count', totals.line_item_count
+                )
+            FROM orders o
+            JOIN order_item_totals totals
+              ON totals.order_id = o.order_id
+            WHERE totals.line_item_count > 0
+              AND totals.quantity_count = totals.line_item_count
+              AND totals.unit_price_count = totals.line_item_count
+              AND o.total_amount IS NOT NULL
+              AND o.total_amount <> totals.calculated_total
 
             UNION ALL
 
@@ -188,19 +228,36 @@ BEGIN
             WHERE o.status IS NOT NULL
               AND o.status <> LOWER(BTRIM(o.status))
         )
-        SELECT source_table, source_record_id, issue_type, original_values
+        INSERT INTO data_quality_exceptions (
+            source_table,
+            source_record_id,
+            issue_type,
+            original_values
+        )
+        SELECT
+            source_table,
+            source_record_id,
+            issue_type,
+            original_values
         FROM exceptions
-    LOOP
-        PERFORM record_data_quality_exception(
-            r.source_table,
-            r.source_record_id,
-            r.issue_type,
-            r.original_values
-        );
-    END LOOP;
+        ON CONFLICT (source_table, source_record_id, issue_type)
+        DO UPDATE SET
+            last_detected_at = NOW(),
+            detection_count = data_quality_exceptions.detection_count + 1,
+            status = CASE
+                WHEN data_quality_exceptions.status = 'resolved'
+                THEN 'open'
+                ELSE data_quality_exceptions.status
+            END,
+            resolved_at = CASE
+                WHEN data_quality_exceptions.status = 'resolved'
+                THEN NULL
+                ELSE data_quality_exceptions.resolved_at
+            END,
+            resolution_note = CASE
+                WHEN data_quality_exceptions.status = 'resolved'
+                THEN NULL
+                ELSE data_quality_exceptions.resolution_note
+            END;
 END;
 $$;
-
-
-
-

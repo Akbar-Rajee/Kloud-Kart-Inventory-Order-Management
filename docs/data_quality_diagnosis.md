@@ -47,9 +47,7 @@ The project implements three diagnostic database objects:
 - `record_data_quality_exception()`: Inserts new exceptions or updates detection metadata when an existing issue is detected again.
 - `scan_data_quality_exceptions()`: Scans the source tables and records the identified data-quality exceptions.
 
-The initial scanner run recorded **375,368 open exception records across 14 issue types**.
-
-Examples include:
+The latest validated scanner results recorded **377,647 open exception records across 15 issue types**. The scanner implements 17 expected issue checks, of which 15 produced matching records and two produced none.
 
 | Issue type | Open records |
 |---|---:|
@@ -59,9 +57,21 @@ Examples include:
 | Missing order references in order items | 692 |
 | Orders with missing customers | 210 |
 | Order items with NULL prices | 148 |
+| Zero-priced order items for review | 152 |
+| Inventory records missing products | 120 |
+| Zero-quantity inventory movements | 90 |
+| Products with missing categories | 37 |
 | Negative product stock | 14 |
+| Large order quantities for review | 6 |
+| Unreachable categories | 3 |
+| Categories with missing parents | 1 |
+| Order-total mismatches | 2,279 |
 
-These counts represent affected records, not necessarily distinct business incidents. For example, the 1,068 duplicate-email exceptions represent implicated customer records across 533 duplicate groups.
+The two checks with no matching records were `ORDER_ITEM_PRODUCT_MISSING` and `PRODUCT_CATEGORY_NOT_FOUND`.
+
+The counts represent exception records, not necessarily distinct business incidents. For example, the 1,068 duplicate-email exceptions represent implicated customer records across 533 duplicate groups.
+
+The latest validation recorded **1,130,662 cumulative detections**. This is a detection counter across repeated scans, not the number of unique exceptions.
 
 The register has important limitations:
 

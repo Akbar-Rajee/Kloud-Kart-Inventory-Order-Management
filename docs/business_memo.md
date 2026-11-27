@@ -1,8 +1,8 @@
-# Business Memo
+﻿# Business Memo
 
 **To:** Nana Adjei, Operations Manager
 **From:** Kloud Kart Data Engineering Project Team
-**Date:** 26 November 2026
+**Date:** 27 November 2026
 **Subject:** Improving Order Reliability, Inventory Visibility and Customer Reporting
 
 ## Executive summary

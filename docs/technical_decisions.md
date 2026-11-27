@@ -214,6 +214,60 @@ The `product_category_exceptions` and
 `inventory_reconciliation_review` views remain available for
 operational investigation.
 
+### Scanner performance optimization and validation
+
+The initial scanner used a PL/pgSQL row-by-row loop to register each
+exception. This approach was too slow for the supplied dataset: an
+execution exceeded ten minutes and was cancelled before completion.
+
+The scanner was optimized to collect detected exceptions using a
+common table expression and register them through a single bulk
+`INSERT ... ON CONFLICT` statement.
+
+The conflict handling preserves the existing exception lifecycle:
+- Updates the last detection timestamp.
+- Increments the detection count.
+- Reopens resolved exceptions when they are detected again.
+- Clears resolution timestamps and notes when reopening.
+- Preserves the original captured source values.
+- Preserves investigating status for existing records.
+
+The order-total mismatch check was also optimized. Instead of
+calculating item totals separately for each order, the scanner groups
+order items by order ID and calculates their totals in one aggregation.
+
+Two additional checks are included:
+- `ORDER_ITEM_PRODUCT_MISSING`
+- `ORDER_TOTAL_MISMATCH`
+
+### Measured validation evidence
+
+The optimized scanner was executed twice against the supplied dataset:
+
+| Test | Observed result |
+|---|---:|
+| First optimized scan | 14.53 seconds |
+| Second optimized scan | 13.04 seconds |
+| Exceptions before first scan | 375,368 |
+| Exceptions after first scan | 377,647 |
+| New exception records | 2,279 |
+| Distinct exception keys after repeat scan | 377,647 |
+| Duplicate exception records | 0 |
+| Total detections after repeat scan | 1,130,662 |
+
+The scanner accounts for all 17 expected issue types. Fifteen types
+produced exceptions; `ORDER_ITEM_PRODUCT_MISSING` and
+`PRODUCT_CATEGORY_NOT_FOUND` returned zero matching records.
+
+A transactional test temporarily marked an existing negative-stock
+exception as resolved. The next scan reopened it, cleared its resolution
+details, and incremented its detection count. The test transaction was
+rolled back, preserving the original database state.
+
+The previous row-by-row execution was interrupted after exceeding ten
+minutes. Therefore, the measurements demonstrate successful completion
+of the optimized implementation but do not establish an exact speedup
+ratio against a completed baseline run.
 ## 7. Deployment order
 
 Run the SQL files after the original instructor schema and data load:
